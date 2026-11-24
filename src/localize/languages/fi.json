@@ -1,0 +1,38 @@
+{
+    "common": {
+        "name": "Tilojen aikakortti",
+        "description": "Kuinka suuren osan kustakin päivästä entiteetti vietti kussakin tilassa, tämän päivän aikajana ja päiväpylväät.",
+        "no_entity": "Valitse entiteetti.",
+        "no_states": "Valitse vähintään yksi laskettava tila.",
+        "invalid_days": "Jakson pitää olla 14, 30, 60 tai 90 päivää.",
+        "invalid_row_step": "Pyöristyksen pitää olla full tai half.",
+        "unknown_entity": "Entiteettiä ei löydy"
+    },
+    "card": {
+        "hours": "h",
+        "minutes": "min",
+        "days": "{count} pv",
+        "average": "Keskimäärin",
+        "other": "Muu tila tai ei tietoa",
+        "no_data": "Ei tietoa",
+        "range": "Jakso"
+    },
+    "editor": {
+        "title": "Otsikko",
+        "entity": "Entiteetti",
+        "states": "Laskettavat tilat",
+        "states_helper": "Muut tilat lasketaan muuksi. Laskuri säilyttää päivät pidempään kuin tallennin säilyttää historian.",
+        "state": "Tila",
+        "state_helper": "Kuten Home Assistant sen tallentaa, esimerkiksi on tai playing.",
+        "name": "Nimi",
+        "color": "Väri",
+        "color_helper": "Mikä tahansa CSS-väri. Tyhjänä teema päättää.",
+        "counter": "Laskuri",
+        "counter_helper": "Tämän tilan History Stats -anturi, tyyppiä aika, keskiyöstä tähän hetkeen.",
+        "days": "Ensin näytettävä jakso",
+        "row_step": "Pyöristys osioihin jaetussa näkymässä",
+        "row_step_helper": "Automaattisella rivikorkeudella kortin korkeus pyöristetään ylöspäin kokonaisiin riveihin, tai tilan säästämiseksi puolikkaisiin riveihin.",
+        "row_step_full": "Kokonaisiin riveihin",
+        "row_step_half": "Puolikkaisiin riveihin"
+    }
+}

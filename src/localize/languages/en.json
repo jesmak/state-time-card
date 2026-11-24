@@ -1,0 +1,38 @@
+{
+    "common": {
+        "name": "State time card",
+        "description": "How much of each day an entity spent in each state, today's timeline and daily bars.",
+        "no_entity": "Choose an entity.",
+        "no_states": "Choose at least one state to count.",
+        "invalid_days": "The range must be 14, 30, 60 or 90 days.",
+        "invalid_row_step": "The rounding must be full or half.",
+        "unknown_entity": "Entity not found"
+    },
+    "card": {
+        "hours": "h",
+        "minutes": "min",
+        "days": "{count} d",
+        "average": "Average",
+        "other": "Other or no data",
+        "no_data": "No data",
+        "range": "Range"
+    },
+    "editor": {
+        "title": "Title",
+        "entity": "Entity",
+        "states": "States to count",
+        "states_helper": "Every other state counts as other. A counter keeps days for longer than the recorder keeps history.",
+        "state": "State",
+        "state_helper": "As Home Assistant stores it, such as on or playing.",
+        "name": "Name",
+        "color": "Colour",
+        "color_helper": "Any CSS colour. Left empty, the theme decides.",
+        "counter": "Counter",
+        "counter_helper": "A History Stats sensor of type time for this state, from midnight to now.",
+        "days": "Range shown first",
+        "row_step": "Rounding in a sections view",
+        "row_step_helper": "With automatic row height, the card's height is rounded up to whole rows, or to half rows to save space.",
+        "row_step_full": "Whole rows",
+        "row_step_half": "Half rows"
+    }
+}

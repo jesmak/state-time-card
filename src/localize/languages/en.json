@@ -15,6 +15,7 @@
         "average": "Average",
         "other": "Other or no data",
         "no_data": "No data",
+        "no_history": "No history left for this day",
         "range": "Range"
     },
     "editor": {

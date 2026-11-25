@@ -15,6 +15,7 @@
         "average": "Keskimäärin",
         "other": "Muu tila tai ei tietoa",
         "no_data": "Ei tietoa",
+        "no_history": "Tämän päivän historiaa ei ole enää tallessa",
         "range": "Jakso"
     },
     "editor": {

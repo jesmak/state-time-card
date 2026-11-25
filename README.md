@@ -63,13 +63,18 @@ A state written as an object takes these:
 
 ## What it shows
 
-- **Today's time in each state** as large figures, and with more than one state, the first state's share of the time
-  counted.
-- **Today's timeline** from midnight to now, each counted state in its colour. A state not counted, and time with no
+- **Today's time in each state**, or the day whose bar was clicked (below), as large figures, and with more than one
+  state, the first state's share of the time counted.
+- **Today's timeline** from midnight to now, or the clicked day's, each counted state in its colour. A state not counted, and time with no
   data, is hatched. Hovering over a stretch shows its state and times.
-- **A bar per day** over the range chosen with the chips, the states stacked, today outlined, with a line every four
-  hours. Hovering over a bar shows the day's time in each state. A day before the history starts has no bar.
+- **A bar per day** over the range chosen with the chips, the states stacked, with a line every four hours. Hovering
+  over a bar shows the day's time in each state. A day before the history starts has no bar.
 - **Each state's average** per day, today left out as it isn't over yet, and a legend.
+
+Clicking a bar shows its day at the top instead of today, its time in each state and its timeline from midnight to
+midnight, and outlines the bar. Clicking it again, or today's bar, goes back to today, and so does changing the range or
+the day changing at midnight. A day the recorder has dropped from its history still shows its time from a counter, but its
+timeline has nothing to draw, and a day it kept part of draws that part.
 
 Days are Home Assistant's own, in its time zone, whatever time zone the browser is in.
 

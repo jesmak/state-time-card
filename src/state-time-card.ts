@@ -1,7 +1,7 @@
 /**
- * A dashboard card that shows how much of each day an entity spent in each of the states it is told to count: today's
- * time per state as large figures, today's timeline from midnight, and a stacked bar per day over 14 to 90 days, with
- * each state's average under them.
+ * A dashboard card that shows how much of each day an entity spent in each of the states it is told to count: a day's
+ * time per state as large figures and its timeline from midnight, today or the day whose bar was clicked, and a stacked
+ * bar per day over 14 to 90 days, with each state's average under them.
  *
  * Its parts are the same whatever the data, so its height depends only on its width and its states. In a sections view
  * on automatic rows it fills whole rows, the room left over spread between the parts. Held to more rows than it needs,
@@ -13,10 +13,11 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { CARD_VERSION } from "./const";
 import {
-    DAY,
-    HOUR,
     MINUTE,
     counterNow,
+    covers,
+    dayFormatter,
+    endOfDay,
     fetchChanges,
     fetchCounters,
     filled,
@@ -26,6 +27,7 @@ import {
     lastDays,
     mergeChanges,
     needsFetch,
+    nextSelection,
     segmentsOf,
     startOfDay,
 } from "./data";
@@ -113,6 +115,10 @@ export class StateTimeCard extends LitElement {
     /** Each counter's hourly maximums, in hours. */
     @state() private counterRows: Record<string, StatisticRow[]> = {};
     @state() private now = Date.now();
+    /** The day a bar was clicked for, shown at the top instead of today, and the day it was clicked on, as it lasts only that day. */
+    @state() private selected?: { day: Day; on: string };
+    /** The history of a chosen day the stored changes don't reach, as a state with a counter has its history read only for today. */
+    @state() private dayChanges?: { day: string; changes: Change[] };
     /** The height that fills whole rows, 0 when the card doesn't fill rows. */
     @state() private filled = 0;
     /** Held to rows set in the layout tab, and whether the bars grow into the room there rather than the parts spreading out. */
@@ -122,6 +128,8 @@ export class StateTimeCard extends LitElement {
     /** What the last answers were asked for, to know when to ask again. */
     private asked?: Asked;
     private fetching = false;
+    /** The day whose own history is being asked for, so the entity's changes meanwhile don't ask again. */
+    private fetchingDay?: string;
     private timers: number[] = [];
     private readonly resizer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => this.scheduleFill());
     private fillFrame = 0;
@@ -155,6 +163,7 @@ export class StateTimeCard extends LitElement {
             this.changes = undefined;
             this.counterRows = {};
             this.asked = undefined;
+            this.dayChanges = undefined;
         }
     }
 
@@ -204,6 +213,11 @@ export class StateTimeCard extends LitElement {
     }
 
     protected willUpdate(changed: PropertyValues): void {
+        // A chosen day gives way to today when the range or the configuration changes, and at midnight.
+        const today = dayFormatter(this.hass?.config?.time_zone)(this.now);
+        if (this.selected && (changed.has("range") || changed.has("config") || this.selected.on !== today)) {
+            this.selected = undefined;
+        }
         if (changed.has("hass") && this.hass && this.config) {
             const entity = this.hass.states[this.config.entity];
             const old = (changed.get("hass") as HomeAssistant | undefined)?.states[this.config.entity];
@@ -219,11 +233,44 @@ export class StateTimeCard extends LitElement {
         if (changed.has("hass") || changed.has("config") || changed.has("range")) {
             this.load();
         }
+        if (changed.has("selected") || changed.has("changes")) {
+            this.loadDay();
+        }
         const card = this.renderRoot.querySelector("ha-card");
         if (card && this.resizer) {
             this.resizer.observe(card);
         }
         this.scheduleFill();
+    }
+
+    /** Asks the recorder for the chosen day's history when the stored changes don't reach it, for its timeline. */
+    private async loadDay(): Promise<void> {
+        const hass = this.hass;
+        const config = this.config;
+        const selected = this.selected;
+        const timeZone = hass?.config?.time_zone;
+        const day = selected?.day.day;
+        if (!hass?.callWS || !config || !selected || this.dayChanges?.day === day || this.fetchingDay === day) {
+            return;
+        }
+        const start = startOfDay(selected.day.time, timeZone);
+        if (covers(this.changes, start)) {
+            return;
+        }
+        this.fetchingDay = day;
+        try {
+            const changes = await fetchChanges(hass, config.entity, start, endOfDay(start, timeZone));
+            // A day chosen meanwhile, or another entity, has its own answer coming.
+            if (this.selected === selected && this.config === config) {
+                this.dayChanges = { day: selected.day.day, changes };
+            }
+        } catch (error) {
+            console.error("state-time-card: the recorder didn't answer", error);
+        } finally {
+            if (this.fetchingDay === day) {
+                this.fetchingDay = undefined;
+            }
+        }
     }
 
     /** Asks the recorder for what the range needs, unless the last answers already cover it. Forced, it asks again. */
@@ -284,6 +331,9 @@ export class StateTimeCard extends LitElement {
         const timeZone = hass.config?.time_zone;
         const days = lastDays(this.range, this.now, timeZone);
         const series = this.series(entity, days);
+        // The day at the top: the one a bar was clicked for, otherwise today.
+        const chosen = this.selected ? days.findIndex((day) => day.day === this.selected?.day.day) : -1;
+        const shown = chosen === -1 ? days.length - 1 : chosen;
         return html`
             <ha-card
                 class=${this.grows ? "grows" : ""}
@@ -292,9 +342,9 @@ export class StateTimeCard extends LitElement {
                 <div class="content">
                     <div class="head">
                         <span class="title">${config.title || this.entityName(entity)}</span>
-                        <span class="date">${this.dateText(this.now, { weekday: "short", day: "numeric", month: "numeric" })}</span>
+                        <span class="date">${this.dateText(days[shown].time, { weekday: "short", day: "numeric", month: "numeric" })}</span>
                     </div>
-                    ${this.renderTotals(series)} ${this.renderTimeline(series)}
+                    ${this.renderTotals(series, shown)} ${this.renderTimeline(series, days[shown], shown === days.length - 1)}
                     <div class="ranges" role="group" aria-label=${this.text("card.range")}>
                         ${RANGES.map(
                             (range) =>
@@ -307,7 +357,7 @@ export class StateTimeCard extends LitElement {
                                 </button>`,
                         )}
                     </div>
-                    ${this.renderBars(series, days)} ${this.renderFoot(series)}
+                    ${this.renderBars(series, days, shown)} ${this.renderFoot(series)}
                 </div>
             </ha-card>
         `;
@@ -333,14 +383,14 @@ export class StateTimeCard extends LitElement {
         });
     }
 
-    private renderTotals(series: Series[]): TemplateResult {
-        const today = series.map((entry) => entry.hours[entry.hours.length - 1]);
-        const counted = today.reduce<number>((sum, value) => sum + (value ?? 0), 0);
-        const share = series.length > 1 && counted > 0 ? Math.round((100 * (today[0] ?? 0)) / counted) : null;
+    private renderTotals(series: Series[], index: number): TemplateResult {
+        const day = series.map((entry) => entry.hours[index]);
+        const counted = day.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+        const share = series.length > 1 && counted > 0 ? Math.round((100 * (day[0] ?? 0)) / counted) : null;
         return html`
             <div class="totals">
                 ${series.map((entry, index) => {
-                    const value = today[index];
+                    const value = day[index];
                     return html`<div class="total">
                         <div class="value">${value === null ? "–" : this.duration(value, true)}</div>
                         <div class="label"><span class="swatch" style="background: ${entry.color}"></span>${entry.name}</div>
@@ -358,23 +408,34 @@ export class StateTimeCard extends LitElement {
         `;
     }
 
-    private renderTimeline(series: Series[]): TemplateResult {
+    /**
+     * The day's timeline from midnight, up to now for today. A past day's comes from the stored changes when they reach
+     * it, otherwise from its own history, asked for when the day was chosen.
+     */
+    private renderTimeline(series: Series[], day: Day, isToday: boolean): TemplateResult {
         const timeZone = this.hass?.config?.time_zone;
-        const start = startOfDay(this.now, timeZone);
-        const length = startOfDay(start + DAY + 2 * HOUR, timeZone) - start;
+        const start = startOfDay(day.time, timeZone);
+        const end = endOfDay(start, timeZone);
+        const until = isToday ? this.now : end;
+        const stored = isToday || covers(this.changes, start);
+        const own = this.dayChanges?.day === day.day ? this.dayChanges.changes : undefined;
+        const changes = stored ? (this.changes ?? []) : (own ?? []);
+        // The day's own history came back empty, so the recorder has dropped all of it. A day it kept part of draws that part.
+        const gone = !stored && own?.length === 0;
         const colors = new Map(series.map((entry) => [entry.state, entry]));
         const segments = segmentsOf(
-            this.changes ?? [],
+            changes,
             start,
-            this.now,
+            until,
             series.map((entry) => entry.state),
         ).filter((segment) => segment.state !== null);
         /** A length of time as a share of the day's width. */
-        const share = (milliseconds: number) => `${((100 * milliseconds) / length).toFixed(3)}%`;
+        const share = (milliseconds: number) => `${((100 * milliseconds) / (end - start)).toFixed(3)}%`;
         return html`
             <div class="timeline">
                 <div class="track">
-                    <div class="past" style="width: ${share(this.now - start)}"></div>
+                    <div class="past" style="width: ${share(until - start)}"></div>
+                    ${gone ? html`<span class="gone" title=${this.text("card.no_history")}>${this.text("card.no_history")}</span>` : nothing}
                     ${segments.map((segment) => {
                         const entry = colors.get(segment.state as string) as Series;
                         const tip = `${entry.name} ${this.clock(segment.start)}–${this.clock(segment.end)}`;
@@ -390,7 +451,9 @@ export class StateTimeCard extends LitElement {
         `;
     }
 
-    private renderBars(series: Series[], days: Day[]): TemplateResult {
+    /** The bars, each a button that shows its day at the top, or today again when it is already shown. */
+    private renderBars(series: Series[], days: Day[], shown: number): TemplateResult {
+        const today = days[days.length - 1].day;
         const totals = days.map((_, index) => series.reduce((sum, entry) => sum + (entry.hours[index] ?? 0), 0));
         const top = Math.max(GRID_HOURS, Math.ceil(Math.max(...totals) / GRID_HOURS) * GRID_HOURS);
         const gap = days.length > 30 ? 1 : days.length > 14 ? 2 : 3;
@@ -416,14 +479,20 @@ export class StateTimeCard extends LitElement {
                                   )
                                 : [this.text("card.no_data")]),
                         ].join("\n");
-                        return html`<div class=${index === days.length - 1 ? "day today" : "day"} title=${tip}>
+                        return html`<button
+                            class=${index === shown ? "day shown" : "day"}
+                            title=${tip}
+                            aria-label=${tip}
+                            aria-pressed=${index === shown}
+                            @click=${() => this.choose(day, today)}
+                        >
                             ${series.map(
                                 (entry) =>
                                     html`<div
                                         style="height: ${(100 * (entry.hours[index] ?? 0)) / top}%; background: ${entry.color}"
                                     ></div>`,
                             )}
-                        </div>`;
+                        </button>`;
                     })}
                 </div>
                 <div class="labels" style="gap: ${gap}px">
@@ -436,6 +505,11 @@ export class StateTimeCard extends LitElement {
                 </div>
             </div>
         `;
+    }
+
+    private choose(day: Day, today: string): void {
+        const next = nextSelection(this.selected?.day.day, day.day, today);
+        this.selected = next ? { day, on: today } : undefined;
     }
 
     private renderFoot(series: Series[]): TemplateResult {
@@ -731,14 +805,38 @@ export class StateTimeCard extends LitElement {
                 min-width: 0;
                 display: flex;
                 flex-direction: column-reverse;
+                padding: 0;
+                border: none;
+                border-radius: 2px;
+                background: none;
+                font: inherit;
+                cursor: pointer;
             }
             .day > div:last-child {
                 border-radius: 2px 2px 0 0;
             }
-            .day.today {
+            .day:hover {
+                background: color-mix(in srgb, var(--secondary-text-color) 8%, transparent);
+            }
+            .day.shown {
                 outline: 1px dashed color-mix(in srgb, var(--primary-color) 60%, transparent);
                 outline-offset: 1px;
-                border-radius: 2px;
+            }
+            .day:focus-visible {
+                outline: 2px solid var(--primary-color);
+                outline-offset: 1px;
+            }
+            .gone {
+                position: absolute;
+                inset: 0;
+                padding: 0 6px;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                font-size: 10px;
+                line-height: 12px;
+                color: var(--secondary-text-color);
             }
             .grid {
                 position: absolute;

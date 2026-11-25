@@ -82,6 +82,24 @@ export function startOfDay(time: number, timeZone?: string): number {
     return dayOf(guess - HOUR) === day ? guess - HOUR : guess;
 }
 
+/** The moment the day that starts at `start` ends, the next midnight, whether the day is 23, 24 or 25 hours long. */
+export function endOfDay(start: number, timeZone?: string): number {
+    return startOfDay(start + DAY + 2 * HOUR, timeZone);
+}
+
+/** Whether the changes reach back to `start`: their first is the state the entity was in at that moment or before it. */
+export function covers(changes: Change[] | undefined, start: number): boolean {
+    return Boolean(changes?.length) && (changes as Change[])[0].time <= start;
+}
+
+/**
+ * The day shown at the top after a bar is clicked: the bar's day, or none, meaning today, when the bar is today's or the
+ * day already shown.
+ */
+export function nextSelection(current: string | undefined, clicked: string, today: string): string | undefined {
+    return clicked === today || clicked === current ? undefined : clicked;
+}
+
 /**
  * The last `count` days, oldest first and ending today, each with a moment inside it. Stepping back a few hours at a
  * time never skips or repeats a day, whatever daylight saving time does.
@@ -141,7 +159,7 @@ export function hoursFromHistory(changes: Change[], state: string, days: Day[], 
     const first = changes[0]?.time;
     return days.map(({ time }) => {
         const start = startOfDay(time, timeZone);
-        const end = Math.min(startOfDay(start + DAY + 2 * HOUR, timeZone), now);
+        const end = Math.min(endOfDay(start, timeZone), now);
         if (first === undefined || first >= end) {
             return null;
         }

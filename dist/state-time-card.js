@@ -642,6 +642,15 @@ function startOfDay(time, timeZone) {
   }
   return dayOf(guess - HOUR) === day ? guess - HOUR : guess;
 }
+function endOfDay(start, timeZone) {
+  return startOfDay(start + DAY + 2 * HOUR, timeZone);
+}
+function covers(changes, start) {
+  return Boolean(changes?.length) && changes[0].time <= start;
+}
+function nextSelection(current, clicked, today) {
+  return clicked === today || clicked === current ? void 0 : clicked;
+}
 function lastDays(count, now, timeZone) {
   const dayOf = dayFormatter(timeZone);
   const days = [];
@@ -685,7 +694,7 @@ function hoursFromHistory(changes, state, days, now, timeZone) {
   const first = changes[0]?.time;
   return days.map(({ time }) => {
     const start = startOfDay(time, timeZone);
-    const end = Math.min(startOfDay(start + DAY + 2 * HOUR, timeZone), now);
+    const end = Math.min(endOfDay(start, timeZone), now);
     if (first === void 0 || first >= end) {
       return null;
     }
@@ -791,6 +800,7 @@ var en_default = {
     average: "Average",
     other: "Other or no data",
     no_data: "No data",
+    no_history: "No history left for this day",
     range: "Range"
   },
   editor: {
@@ -831,6 +841,7 @@ var fi_default = {
     average: "Keskim\xE4\xE4rin",
     other: "Muu tila tai ei tietoa",
     no_data: "Ei tietoa",
+    no_history: "T\xE4m\xE4n p\xE4iv\xE4n historiaa ei ole en\xE4\xE4 tallessa",
     range: "Jakso"
   },
   editor: {
@@ -1172,6 +1183,7 @@ var StateTimeCard = class extends i4 {
       this.changes = void 0;
       this.counterRows = {};
       this.asked = void 0;
+      this.dayChanges = void 0;
     }
   }
   getCardSize() {
@@ -1210,6 +1222,10 @@ var StateTimeCard = class extends i4 {
     return old.language !== hass.language || old.locale?.language !== hass.locale?.language || old.config?.time_zone !== hass.config?.time_zone || watched.some((id) => old.states[id] !== hass.states[id]);
   }
   willUpdate(changed) {
+    const today = dayFormatter(this.hass?.config?.time_zone)(this.now);
+    if (this.selected && (changed.has("range") || changed.has("config") || this.selected.on !== today)) {
+      this.selected = void 0;
+    }
     if (changed.has("hass") && this.hass && this.config) {
       const entity = this.hass.states[this.config.entity];
       const old = changed.get("hass")?.states[this.config.entity];
@@ -1223,11 +1239,42 @@ var StateTimeCard = class extends i4 {
     if (changed.has("hass") || changed.has("config") || changed.has("range")) {
       this.load();
     }
+    if (changed.has("selected") || changed.has("changes")) {
+      this.loadDay();
+    }
     const card = this.renderRoot.querySelector("ha-card");
     if (card && this.resizer) {
       this.resizer.observe(card);
     }
     this.scheduleFill();
+  }
+  /** Asks the recorder for the chosen day's history when the stored changes don't reach it, for its timeline. */
+  async loadDay() {
+    const hass = this.hass;
+    const config = this.config;
+    const selected = this.selected;
+    const timeZone = hass?.config?.time_zone;
+    const day = selected?.day.day;
+    if (!hass?.callWS || !config || !selected || this.dayChanges?.day === day || this.fetchingDay === day) {
+      return;
+    }
+    const start = startOfDay(selected.day.time, timeZone);
+    if (covers(this.changes, start)) {
+      return;
+    }
+    this.fetchingDay = day;
+    try {
+      const changes = await fetchChanges(hass, config.entity, start, endOfDay(start, timeZone));
+      if (this.selected === selected && this.config === config) {
+        this.dayChanges = { day: selected.day.day, changes };
+      }
+    } catch (error) {
+      console.error("state-time-card: the recorder didn't answer", error);
+    } finally {
+      if (this.fetchingDay === day) {
+        this.fetchingDay = void 0;
+      }
+    }
   }
   /** Asks the recorder for what the range needs, unless the last answers already cover it. Forced, it asks again. */
   async load(force = false) {
@@ -1284,6 +1331,8 @@ var StateTimeCard = class extends i4 {
     const timeZone = hass.config?.time_zone;
     const days = lastDays(this.range, this.now, timeZone);
     const series = this.series(entity, days);
+    const chosen = this.selected ? days.findIndex((day) => day.day === this.selected?.day.day) : -1;
+    const shown = chosen === -1 ? days.length - 1 : chosen;
     return b2`
             <ha-card
                 class=${this.grows ? "grows" : ""}
@@ -1292,9 +1341,9 @@ var StateTimeCard = class extends i4 {
                 <div class="content">
                     <div class="head">
                         <span class="title">${config.title || this.entityName(entity)}</span>
-                        <span class="date">${this.dateText(this.now, { weekday: "short", day: "numeric", month: "numeric" })}</span>
+                        <span class="date">${this.dateText(days[shown].time, { weekday: "short", day: "numeric", month: "numeric" })}</span>
                     </div>
-                    ${this.renderTotals(series)} ${this.renderTimeline(series)}
+                    ${this.renderTotals(series, shown)} ${this.renderTimeline(series, days[shown], shown === days.length - 1)}
                     <div class="ranges" role="group" aria-label=${this.text("card.range")}>
                         ${RANGES.map(
       (range) => b2`<button
@@ -1306,7 +1355,7 @@ var StateTimeCard = class extends i4 {
                                 </button>`
     )}
                     </div>
-                    ${this.renderBars(series, days)} ${this.renderFoot(series)}
+                    ${this.renderBars(series, days, shown)} ${this.renderFoot(series)}
                 </div>
             </ha-card>
         `;
@@ -1328,14 +1377,14 @@ var StateTimeCard = class extends i4 {
       };
     });
   }
-  renderTotals(series) {
-    const today = series.map((entry) => entry.hours[entry.hours.length - 1]);
-    const counted = today.reduce((sum, value) => sum + (value ?? 0), 0);
-    const share = series.length > 1 && counted > 0 ? Math.round(100 * (today[0] ?? 0) / counted) : null;
+  renderTotals(series, index) {
+    const day = series.map((entry) => entry.hours[index]);
+    const counted = day.reduce((sum, value) => sum + (value ?? 0), 0);
+    const share = series.length > 1 && counted > 0 ? Math.round(100 * (day[0] ?? 0) / counted) : null;
     return b2`
             <div class="totals">
-                ${series.map((entry, index) => {
-      const value = today[index];
+                ${series.map((entry, index2) => {
+      const value = day[index2];
       return b2`<div class="total">
                         <div class="value">${value === null ? "\u2013" : this.duration(value, true)}</div>
                         <div class="label"><span class="swatch" style="background: ${entry.color}"></span>${entry.name}</div>
@@ -1348,22 +1397,32 @@ var StateTimeCard = class extends i4 {
             </div>
         `;
   }
-  renderTimeline(series) {
+  /**
+   * The day's timeline from midnight, up to now for today. A past day's comes from the stored changes when they reach
+   * it, otherwise from its own history, asked for when the day was chosen.
+   */
+  renderTimeline(series, day, isToday) {
     const timeZone = this.hass?.config?.time_zone;
-    const start = startOfDay(this.now, timeZone);
-    const length = startOfDay(start + DAY + 2 * HOUR, timeZone) - start;
+    const start = startOfDay(day.time, timeZone);
+    const end = endOfDay(start, timeZone);
+    const until = isToday ? this.now : end;
+    const stored = isToday || covers(this.changes, start);
+    const own = this.dayChanges?.day === day.day ? this.dayChanges.changes : void 0;
+    const changes = stored ? this.changes ?? [] : own ?? [];
+    const gone = !stored && own?.length === 0;
     const colors = new Map(series.map((entry) => [entry.state, entry]));
     const segments = segmentsOf(
-      this.changes ?? [],
+      changes,
       start,
-      this.now,
+      until,
       series.map((entry) => entry.state)
     ).filter((segment) => segment.state !== null);
-    const share = (milliseconds) => `${(100 * milliseconds / length).toFixed(3)}%`;
+    const share = (milliseconds) => `${(100 * milliseconds / (end - start)).toFixed(3)}%`;
     return b2`
             <div class="timeline">
                 <div class="track">
-                    <div class="past" style="width: ${share(this.now - start)}"></div>
+                    <div class="past" style="width: ${share(until - start)}"></div>
+                    ${gone ? b2`<span class="gone" title=${this.text("card.no_history")}>${this.text("card.no_history")}</span>` : A}
                     ${segments.map((segment) => {
       const entry = colors.get(segment.state);
       const tip = `${entry.name} ${this.clock(segment.start)}\u2013${this.clock(segment.end)}`;
@@ -1378,7 +1437,9 @@ var StateTimeCard = class extends i4 {
             </div>
         `;
   }
-  renderBars(series, days) {
+  /** The bars, each a button that shows its day at the top, or today again when it is already shown. */
+  renderBars(series, days, shown) {
+    const today = days[days.length - 1].day;
     const totals = days.map((_2, index) => series.reduce((sum, entry) => sum + (entry.hours[index] ?? 0), 0));
     const top = Math.max(GRID_HOURS, Math.ceil(Math.max(...totals) / GRID_HOURS) * GRID_HOURS);
     const gap = days.length > 30 ? 1 : days.length > 14 ? 2 : 3;
@@ -1401,13 +1462,19 @@ var StateTimeCard = class extends i4 {
           (entry) => `${entry.name} ${entry.hours[index] === null ? "\u2013" : this.duration(entry.hours[index] ?? 0)}`
         ) : [this.text("card.no_data")]
       ].join("\n");
-      return b2`<div class=${index === days.length - 1 ? "day today" : "day"} title=${tip}>
+      return b2`<button
+                            class=${index === shown ? "day shown" : "day"}
+                            title=${tip}
+                            aria-label=${tip}
+                            aria-pressed=${index === shown}
+                            @click=${() => this.choose(day, today)}
+                        >
                             ${series.map(
         (entry) => b2`<div
                                         style="height: ${100 * (entry.hours[index] ?? 0) / top}%; background: ${entry.color}"
                                     ></div>`
       )}
-                        </div>`;
+                        </button>`;
     })}
                 </div>
                 <div class="labels" style="gap: ${gap}px">
@@ -1419,6 +1486,10 @@ var StateTimeCard = class extends i4 {
                 </div>
             </div>
         `;
+  }
+  choose(day, today) {
+    const next = nextSelection(this.selected?.day.day, day.day, today);
+    this.selected = next ? { day, on: today } : void 0;
   }
   renderFoot(series) {
     const averages = series.map((entry) => averageOf(entry.hours));
@@ -1687,14 +1758,38 @@ var StateTimeCard = class extends i4 {
                 min-width: 0;
                 display: flex;
                 flex-direction: column-reverse;
+                padding: 0;
+                border: none;
+                border-radius: 2px;
+                background: none;
+                font: inherit;
+                cursor: pointer;
             }
             .day > div:last-child {
                 border-radius: 2px 2px 0 0;
             }
-            .day.today {
+            .day:hover {
+                background: color-mix(in srgb, var(--secondary-text-color) 8%, transparent);
+            }
+            .day.shown {
                 outline: 1px dashed color-mix(in srgb, var(--primary-color) 60%, transparent);
                 outline-offset: 1px;
-                border-radius: 2px;
+            }
+            .day:focus-visible {
+                outline: 2px solid var(--primary-color);
+                outline-offset: 1px;
+            }
+            .gone {
+                position: absolute;
+                inset: 0;
+                padding: 0 6px;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                font-size: 10px;
+                line-height: 12px;
+                color: var(--secondary-text-color);
             }
             .grid {
                 position: absolute;
@@ -1796,6 +1891,12 @@ __decorateClass([
 __decorateClass([
   r5()
 ], StateTimeCard.prototype, "now", 2);
+__decorateClass([
+  r5()
+], StateTimeCard.prototype, "selected", 2);
+__decorateClass([
+  r5()
+], StateTimeCard.prototype, "dayChanges", 2);
 __decorateClass([
   r5()
 ], StateTimeCard.prototype, "filled", 2);

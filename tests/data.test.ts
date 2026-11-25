@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
     HOUR,
     changesOf,
+    covers,
     dayFormatter,
+    endOfDay,
     filled,
     historyStart,
     hoursFromCounter,
@@ -11,6 +13,7 @@ import {
     lastDays,
     mergeChanges,
     needsFetch,
+    nextSelection,
     segmentsOf,
     startOfDay,
     toHours,
@@ -153,6 +156,31 @@ describe("hoursFromCounter", () => {
             { start: Date.parse("2026-11-25T01:30:00+05:30"), max: 1 },
         ];
         expect(hoursFromCounter(rows, india, null, "Asia/Kolkata")).toEqual([5, 1]);
+    });
+});
+
+describe("endOfDay", () => {
+    it("is the next midnight on the 23- and 25-hour days", () => {
+        expect(endOfDay(at("2026-03-29T00:00:00"), ZONE)).toBe(at("2026-03-30T00:00:00", "+03:00"));
+        expect(endOfDay(at("2026-10-25T00:00:00", "+03:00"), ZONE)).toBe(at("2026-10-26T00:00:00"));
+    });
+});
+
+describe("covers", () => {
+    it("is true when the first change is at the moment or before it", () => {
+        expect(covers([{ time: 100, state: "on" }], 100)).toBe(true);
+        expect(covers([{ time: 101, state: "on" }], 100)).toBe(false);
+        expect(covers([], 100)).toBe(false);
+        expect(covers(undefined, 100)).toBe(false);
+    });
+});
+
+describe("nextSelection", () => {
+    it("shows the clicked day, and today again for today's bar or the day already shown", () => {
+        expect(nextSelection(undefined, "2026-11-20", "2026-11-24")).toBe("2026-11-20");
+        expect(nextSelection("2026-11-20", "2026-11-21", "2026-11-24")).toBe("2026-11-21");
+        expect(nextSelection("2026-11-20", "2026-11-20", "2026-11-24")).toBeUndefined();
+        expect(nextSelection("2026-11-20", "2026-11-24", "2026-11-24")).toBeUndefined();
     });
 });
 

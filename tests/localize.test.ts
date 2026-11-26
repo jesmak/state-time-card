@@ -40,6 +40,8 @@ describe("languages", () => {
         expect(translate("fi", "card.average")).toBe("Keskimäärin");
         expect(translate("xx", "card.average")).toBe("Average");
         expect(translate("fi-FI", "card.average")).toBe("Keskimäärin");
+        expect(translate("fi_FI", "card.average")).toBe("Keskimäärin");
+        expect(translate("xx-YY", "card.average")).toBe(translate("en", "card.average"));
         expect(translate("fi", "no.such.key")).toBe("no.such.key");
     });
 });
